@@ -1,0 +1,11 @@
+{
+  "description": "Format example only. Replace this synthetic task with a question grounded in your own indexed papers; this is not an acceptance benchmark.",
+  "tasks": [
+    {
+      "id": "method-example",
+      "query": "请检索你已收录的一篇论文，读取原页，说明该论文提出的方法解决什么问题，并引用原文。",
+      "required_terms": [],
+      "insufficient_evidence": false
+    }
+  ]
+}

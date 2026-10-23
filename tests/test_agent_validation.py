@@ -32,3 +32,14 @@ def test_agent_bypass_and_false_sufficiency_are_rejected(atlas):
     assert not report['passed']
     assert any('outside acceptance scope' in error for error in report['errors'])
     assert any('sufficiency' in error for error in report['errors'])
+
+
+def test_usage_limit_is_an_execution_blocker_not_a_content_grade():
+    spec = importlib.util.spec_from_file_location('agent_eval', Path(__file__).parents[1] / 'scripts/codex_agent_eval.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    failure = [dict(type='turn.failed', error={'message': 'You have hit your usage limit'})]
+    assert module.execution_status(1, failure) == 'blocked_usage_limit'
+    assert module.execution_status(1, [dict(type='error', message='Tool failed')]) == 'execution_failed'
+    # A quoted phrase in a successful model answer must not be treated as a service error.
+    assert module.execution_status(0, [dict(type='item.completed', item={'text': 'usage limit'})]) == 'completed'

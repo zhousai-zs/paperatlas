@@ -89,10 +89,20 @@ def validate(atlas, task, answer, events):
                 citations=len(answer.get('evidence', [])), model_items=[item.get('type') for item in items])
 
 
+def execution_status(exit_code, events):
+    """Keep service limits separate from an assessed answer or tool failure."""
+    failures = [event for event in events if event.get('type') in {'error', 'turn.failed'}]
+    if exit_code and any('usage limit' in json.dumps(event).lower() for event in failures):
+        return 'blocked_usage_limit'
+    return 'completed' if exit_code == 0 else 'execution_failed'
+
+
 def run(args):
     tasks = json.loads(Path(args.tasks).read_text('utf-8'))['tasks']
     if args.only:
         tasks = [task for task in tasks if task['id'] == args.only]
+    if not tasks:
+        raise ValueError('No acceptance tasks selected')
     directory = Path(args.output_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     schema_path = directory / 'answer-schema.json'
@@ -104,7 +114,7 @@ def run(args):
     atlas = Atlas(args.data_dir, read_only=True)
     try:
         results = []
-        for task in tasks:
+        for task_index, task in enumerate(tasks):
             final = directory / (task['id'] + '-answer.json')
             raw = directory / (task['id'] + '-events.jsonl')
             stderr = directory / (task['id'] + '-stderr.log')
@@ -129,15 +139,25 @@ def run(args):
                 except json.JSONDecodeError:
                     pass
             answer = json.loads(final.read_text('utf-8')) if final.is_file() and final.stat().st_size else {}
-            checks = validate(atlas, task, answer, events)
-            if exit_code != 0:
+            status = execution_status(exit_code, events)
+            if status == 'blocked_usage_limit':
+                checks = dict(passed=False, errors=['Model service usage limit; answer not assessed'])
+            else:
+                checks = validate(atlas, task, answer, events)
+            if exit_code != 0 and status != 'blocked_usage_limit':
                 checks['errors'].append('Codex exited with code ' + str(exit_code))
                 checks['passed'] = False
-            result = dict(id=task['id'], seconds=time.monotonic()-started, exit_code=exit_code,
+            result = dict(id=task['id'], status=status, seconds=time.monotonic()-started, exit_code=exit_code,
                           checks=checks, answer=answer)
             results.append(result)
+            if status == 'blocked_usage_limit':
+                results.extend(dict(id=pending['id'], status='not_run',
+                    checks=dict(passed=False, errors=['Stopped after model service usage limit']))
+                    for pending in tasks[task_index+1:])
             (directory / 'summary.json').write_text(json.dumps(results, ensure_ascii=False, indent=2), 'utf-8')
             print(json.dumps({k: v for k, v in result.items() if k != 'answer'}, ensure_ascii=False), flush=True)
+            if status == 'blocked_usage_limit':
+                break
         return 0 if all(r['checks']['passed'] for r in results) else 1
     finally:
         atlas.close()

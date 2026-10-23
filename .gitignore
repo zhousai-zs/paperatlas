@@ -11,3 +11,4 @@ shared-chat-transcript.txt
 reports/
 eval/queries.json
 eval/build_queries.py
+eval/my-agent-tasks.json
