@@ -1,0 +1,21 @@
+{
+  "annotation": "Example schema only. Replace doc_id, page and literal source offsets with your own reviewed evidence before evaluation.",
+  "queries": [
+    {
+      "id": "example01",
+      "split": "dev",
+      "category": "method",
+      "query": "Which method uses degradation-aware prompts?",
+      "evidence": [
+        {
+          "doc_id": "sha256:REPLACE_WITH_YOUR_DOCUMENT_SHA256",
+          "page": 1,
+          "start": 0,
+          "end": 16,
+          "quote": "Example evidence"
+        }
+      ]
+    }
+  ],
+  "negatives": ["", "   ", "zzxyqv_nonexistent_987654", "How do I bake a cake?"]
+}

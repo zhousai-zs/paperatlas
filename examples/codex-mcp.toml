@@ -1,0 +1,12 @@
+# Copy this section into your Codex MCP configuration after checking the paths.
+# This file is an example; PaperAtlas never changes your user configuration.
+[mcp_servers.paperatlas]
+command = 'D:\PaperAtlas\.venv\Scripts\python.exe'
+args = ['-m', 'paperatlas', '--data-dir', 'D:\PaperAtlas\.paperatlas', 'mcp']
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+
+[mcp_servers.paperatlas.env]
+HF_HUB_OFFLINE = '1'
+TRANSFORMERS_OFFLINE = '1'
+PYTHONUTF8 = '1'

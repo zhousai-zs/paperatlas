@@ -1,0 +1,13 @@
+.venv/
+.paperatlas/
+.cache/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+shared-chat.html
+shared-chat-transcript.txt
+reports/
+eval/queries.json
+eval/build_queries.py
