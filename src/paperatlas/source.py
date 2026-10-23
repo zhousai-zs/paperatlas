@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+from .references import reference_ranges
 
 from .errors import AtlasError
 
@@ -117,10 +118,12 @@ def read_bundle(path):
         if not parsed.scheme and not parsed.netloc:
             safe_path(root, value)
     pages = []
+    references = {}
     for i, marker in enumerate(markers):
         number = int(marker[1])
         image = safe_path(root, f'pages/page-{number:04d}.png')
         text = markdown[marker.end():markers[i + 1].start() if i + 1 < len(markers) else len(markdown)]
+        references[str(number)] = reference_ranges(text, document['pages'][i]['blocks'])
         pages.append(dict(page=number, text=text, image=str(image),
                           evidence=[e for e in evidence if e['page'] == number]))
     title = root.name
@@ -138,4 +141,4 @@ def read_bundle(path):
     # Recheck input files after parsing, so concurrent edits cannot create a mixed snapshot.
     return dict(doc_id='sha256:' + sha, title=title, root=str(root), pdf=str(pdf),
                 fingerprint=fingerprint(root), status=report['status'], warnings=warnings,
-                integrity=integrity, pages=pages)
+                integrity=integrity, reference_ranges=references, pages=pages)

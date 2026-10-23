@@ -49,7 +49,8 @@ class Atlas:
                 else:
                     chunks, section = [], ''
                     for page in bundle['pages']:
-                        parts, section = chunker.chunks(page['text'], bundle['title'], section)
+                        parts, section = chunker.chunks(page['text'], bundle['title'], section,
+                            bundle['reference_ranges'].get(str(page['page']), []))
                         chunks.extend(dict(part, page=page['page']) for part in parts)
                     if not chunks:
                         raise AtlasError('文档无可检索文本')
@@ -84,7 +85,7 @@ class Atlas:
             raise AtlasError('源文件不可用；请恢复来源目录或重新 index。') from exc
         return doc
 
-    def search_papers(self, query, limit=5, doc_id=None, mode='hybrid'):
+    def search_papers(self, query, limit=5, doc_id=None, mode='hybrid', diverse=False):
         if not isinstance(query, str) or len(query) > 4000 or not query.strip():
             raise AtlasError('查询不能为空且不能超过 4000 字符')
         if not 1 <= limit <= 50 or mode not in {'lexical', 'semantic', 'hybrid'}:
@@ -93,25 +94,35 @@ class Atlas:
             self.db.document(doc_id)
         from .retrieval import ranks, result
         ranked = ranks(self.db, query, mode, self.embedder if mode != 'lexical' else None, doc_id)
-        checked, results, seen_pages = set(), [], set()
+        checked, results, seen_pages, paper_counts = set(), [], set(), {}
         for identity, score in ranked:
             row = self.db.conn.execute('SELECT doc_id,page FROM chunks WHERE id=?', (identity,)).fetchone()
             page_key = (row['doc_id'], row['page'])
             if page_key in seen_pages:
+                continue
+            # Topic searches need evidence across papers; targeted searches may
+            # return as many pages from the selected paper as the caller requests.
+            if diverse and not doc_id and paper_counts.get(row['doc_id'], 0) >= 2:
                 continue
             if row['doc_id'] not in checked:
                 self._fresh(row['doc_id'])
                 checked.add(row['doc_id'])
             results.append(result(self.db, identity, score))
             seen_pages.add(page_key)
+            paper_counts[row['doc_id']] = paper_counts.get(row['doc_id'], 0) + 1
             if len(results) == limit:
                 break
         return dict(query=query, mode=mode, results=results,
-                    notice='结果为相关候选；排序分数不是事实置信度。库外问题也可能返回候选，需读取原文判断。')
+                    notice='结果为相关候选；排序分数不是事实置信度。excerpt 是连续扩展原文，match_range 是定位块。'
+                           '回答前需读取原页；解释跨页时用 read_page(before=1, after=1)，信息不足时限定 doc_id 或换词继续检索。'
+                           '主题比较可设 diverse=true 分散来源；单篇深入请指定 doc_id。'
+                           '库外问题也可能返回候选，需判断证据是否充分。')
 
-    def read_page(self, doc_id, page):
+    def read_page(self, doc_id, page, before=0, after=0):
         if type(page) is not int or page < 1:
             raise AtlasError('page 必须是从 1 开始的 PDF 页码')
+        if any(type(n) is not int or not 0 <= n <= 2 for n in (before, after)):
+            raise AtlasError('before/after 必须为 0–2，最多读取前后各两页')
         doc = self._fresh(doc_id)
         row = self.db.conn.execute('SELECT text FROM pages WHERE doc_id=? AND page=?', (doc_id, page)).fetchone()
         if row is None:
@@ -119,8 +130,27 @@ class Atlas:
         root = Path(doc['root'])
         metadata = json.loads(doc['metadata'])
         evidence = load_json(root, 'evidence.json', optional=True) or []
-        return dict(doc_id=doc_id, title=doc['title'], page=page, markdown=row['text'],
+        def source(number):
+            return dict(pdf=str(safe_path(root, 'source.pdf')),
+                        page_image=str(safe_path(root, f'pages/page-{number:04d}.png')),
+                        evidence=[dict(e, image=str(safe_path(root, e['image']))) for e in evidence if e['page'] == number])
+        output = dict(doc_id=doc_id, title=doc['title'], page=page, markdown=row['text'],
                     status=metadata['status'], warnings=metadata['warnings'], integrity=metadata['integrity'],
-                    source=dict(pdf=str(safe_path(root, 'source.pdf')),
-                                page_image=str(safe_path(root, f'pages/page-{page:04d}.png')),
-                                evidence=[dict(e, image=str(safe_path(root, e['image']))) for e in evidence if e['page'] == page]))
+                    source=source(page))
+        if before or after:
+            neighbors = self.db.conn.execute('SELECT page,text FROM pages WHERE doc_id=? '
+                'AND page BETWEEN ? AND ? AND page!=? ORDER BY ABS(page-?),page',
+                (doc_id, max(1, page-before), page+after, page, page)).fetchall()
+            remaining = max(0, 24000 - len(row['text']))
+            output['neighboring_pages'], output['omitted_pages'] = [], []
+            for neighbor in neighbors:
+                if len(neighbor['text']) > remaining:
+                    output['omitted_pages'].append(neighbor['page'])
+                    continue
+                remaining -= len(neighbor['text'])
+                output['neighboring_pages'].append(dict(page=neighbor['page'], markdown=neighbor['text'],
+                                                        source=source(neighbor['page'])))
+            output['neighboring_pages'].sort(key=lambda p: p['page'])
+            if output['omitted_pages']:
+                output['warnings'] = output['warnings'] + ['相邻页超过 24000 字符总预算；请按 omitted_pages 单独读取，未截断原页。']
+        return output

@@ -20,9 +20,10 @@ async def test_stdio_protocol_list_read_error(atlas, bundle):
             assert {t.name for t in tools.tools} == {'list_papers', 'search_papers', 'read_page'}
             listing = await client.call_tool('list_papers', {})
             assert not listing.is_error
-            page = await client.call_tool('read_page', dict(doc_id=doc, page=2))
+            page = await client.call_tool('read_page', dict(doc_id=doc, page=2, before=1))
             assert not page.is_error
             assert '31.2' in json.dumps(page.model_dump(), ensure_ascii=False)
+            assert 'PromptIR' in json.dumps(page.model_dump(), ensure_ascii=False)
             invalid = await client.call_tool('read_page', dict(doc_id='../source.pdf', page=1))
             assert invalid.is_error
             missing_model = await client.call_tool('search_papers', dict(query='noise'))

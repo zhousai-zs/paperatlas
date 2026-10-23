@@ -1,4 +1,5 @@
 from paperatlas.chunking import Chunker
+from paperatlas.references import reference_ranges
 
 
 def test_long_text_math_and_table_preserve_sources():
@@ -19,3 +20,42 @@ def test_navigation_and_bare_headings_do_not_become_evidence():
     assert len(chunks) == 1
     assert chunks[0]['excerpt'].strip() == 'Actual restoration evidence.'
     assert chunks[0]['section'] == 'Method'
+
+
+def test_structured_references_do_not_leak_past_figure_headings_or_merge_into_body():
+    citation = '99. Zhang, C., Zhu, Y.: All-in-one degradation network. In: CVPR (2023).'
+    text = '# Instruction examples\n\nUseful body before.\n\n' + citation + '\n\nUseful body after.\n'
+    ranges = reference_ranges(text, [dict(type='ref_text', content=[dict(content=citation)])])
+    chunks, _ = Chunker().chunks(text, 'Paper', reference_ranges=ranges)
+    assert len(chunks) == 2
+    assert all('Zhang' not in c['excerpt'] for c in chunks)
+    assert 'Useful body before.' in chunks[0]['excerpt']
+    assert 'Useful body after.' in chunks[1]['excerpt']
+    # A numbered experimental procedure with a year is not a bibliography entry.
+    chunks, _ = Chunker().chunks('# Experiments\n\n1. Train using 2023 images and compare the results.\n', 'Paper')
+    assert chunks
+
+
+def test_reference_continuation_without_heading_and_appendix_are_separate():
+    citation = 'IEEE/CVF Conference on Computer Vision (2023), pp. 5815–5824.'
+    text = citation + '\n\n# Appendix\n\nAdditional experimental details.\n'
+    ranges = reference_ranges(text, [dict(type='ref_text', content=citation)])
+    chunks, section = Chunker().chunks(text, 'Paper', 'References', ranges)
+    assert section == 'Appendix' and len(chunks) == 1
+    assert 'Additional experimental details.' in chunks[0]['excerpt']
+
+
+def test_markdown_punctuation_does_not_break_structured_reference_alignment():
+    text = '[62] A. Author. **Restoration** with prompts. CVPR, 2023.\n'
+    ranges = reference_ranges(text, [dict(type='ref_text', content='62 A Author Restoration with prompts CVPR 2023')])
+    assert ranges and not Chunker().chunks(text, 'Paper', reference_ranges=ranges)[0]
+
+
+def test_reference_urls_and_short_continuations_keep_original_offsets():
+    citation = 'OpenAI. Model card, 2023. URL https://example.com/card.pdf.'
+    text = citation.replace('https://example.com/card.pdf', '[https://example.com/card.pdf](https://example.com/card.pdf)')
+    text += '\n\n28 208–28 220.\n'
+    ranges = reference_ranges(text, [dict(type='ref_text', content=citation),
+                                    dict(type='ref_text', content='28 208–28 220.')])
+    assert len(ranges) == 2
+    assert not Chunker().chunks(text, 'Paper', reference_ranges=ranges)[0]

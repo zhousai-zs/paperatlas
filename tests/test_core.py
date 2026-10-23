@@ -1,4 +1,5 @@
 import json
+import hashlib
 import shutil
 import sqlite3
 
@@ -123,3 +124,61 @@ def test_mcp_database_connection_really_read_only(atlas):
             reader.db.conn.execute('DELETE FROM documents')
     finally:
         reader.close()
+
+
+def test_search_expands_context_without_including_excluded_bibliography(atlas, bundle):
+    text = ('<!-- source_page: 1 -->\n# Method\n\n'
+            + 'Background context for restoration. ' * 60 + '\n\n'
+            + 'UniqueAnchor explains the central mechanism. ' * 30 + '\n\n'
+            + 'Surrounding implementation details. ' * 40 + '\n\n'
+            + '99. Zhang, C.: Unrelated restoration work. In: CVPR (2023).\n\n'
+            + 'A separate claim after the citation.\n\n'
+            + '<!-- source_page: 2 -->\n# Experiments\n\nEvaluation details.\n')
+    (bundle / 'document.md').write_text(text, 'utf-8')
+    atlas.index(bundle, 'lexical')
+    hit = atlas.search_papers('UniqueAnchor', mode='lexical')['results'][0]
+    page = atlas.read_page(hit['doc_id'], 1)
+    start, end = hit['source_range']['start'], hit['source_range']['end']
+    assert hit['excerpt'] == page['markdown'][start:end]
+    assert start <= hit['match_range']['start'] < hit['match_range']['end'] <= end
+    assert end - start > hit['match_range']['end'] - hit['match_range']['start']
+    assert 'Background context' in hit['excerpt'] and 'Surrounding implementation' in hit['excerpt']
+    assert 'Zhang' not in hit['excerpt'] and 'A separate claim' not in hit['excerpt']
+
+
+def test_read_page_neighbors_are_complete_bounded_and_keep_page_attribution(atlas, bundle):
+    doc = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    page = atlas.read_page(doc, 1, before=2, after=2)
+    assert [p['page'] for p in page['neighboring_pages']] == [2]
+    assert '31.2' in page['neighboring_pages'][0]['markdown']
+    assert page['neighboring_pages'][0]['source']['page_image'].endswith('page-0002.png')
+    assert not page['omitted_pages']
+    for bad in [-1, 3, True, 1.5]:
+        with pytest.raises(AtlasError):
+            atlas.read_page(doc, 1, after=bad)
+    with atlas.db.conn:
+        atlas.db.conn.execute('UPDATE pages SET text=? WHERE page=2', ('very long table ' * 3000,))
+    page = atlas.read_page(doc, 1, after=1)
+    assert not page['neighboring_pages'] and page['omitted_pages'] == [2]
+    assert atlas.read_page(doc, 2)['markdown'] == 'very long table ' * 3000
+
+
+def test_topic_search_spreads_evidence_and_doc_filter_allows_deeper_reading(atlas, bundle):
+    document = json.loads((bundle / 'document.json').read_text('utf-8'))
+    document['pages'] += [dict(page_idx=i,blocks=[]) for i in (2,3)]
+    for page in (3,4):
+        (bundle / f'pages/page-{page:04d}.png').write_bytes(b'image')
+    (bundle / 'document.json').write_text(json.dumps(document), 'utf-8')
+    (bundle / 'document.md').write_text(''.join(
+        f'<!-- source_page: {p} -->\n# Method\n\nrestoration shared evidence {p}.\n' for p in range(1,5)), 'utf-8')
+    first = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    second = bundle.parent / 'second'
+    shutil.copytree(bundle, second)
+    (second / 'source.pdf').write_bytes(b'%PDF-second-source')
+    document['source_sha256'] = hashlib.sha256((second / 'source.pdf').read_bytes()).hexdigest()
+    (second / 'document.json').write_text(json.dumps(document), 'utf-8')
+    atlas.index(second, 'lexical')
+    hits = atlas.search_papers('restoration', mode='lexical', diverse=True)['results']
+    assert len(hits) == 4 and len({h['doc_id'] for h in hits}) == 2
+    assert len(atlas.search_papers('restoration', doc_id=first, mode='lexical', diverse=True)['results']) == 4
+    assert len(atlas.search_papers('restoration', mode='lexical')['results']) == 5

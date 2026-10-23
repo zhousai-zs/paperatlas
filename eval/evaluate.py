@@ -35,13 +35,25 @@ def evaluate(data_dir, queries_path, split):
                 response = atlas.search_papers(question['query'], mode=mode)
                 elapsed = time.perf_counter() - start
                 expected = {(e['doc_id'], e['page']) for e in question['evidence']}
+                anchors = {r['chunk_id']: atlas.db.conn.execute('SELECT excerpt FROM chunks WHERE id=?',
+                    (r['chunk_id'],)).fetchone()['excerpt'] for r in response['results']}
                 reciprocal = 0.0
+                context_hit, anchor_hit = False, False
                 for rank, result in enumerate(response['results'], 1):
                     if (result['doc_id'], result['page']) in expected:
-                        reciprocal = 1.0 / rank
-                        break
+                        if not reciprocal:
+                            reciprocal = 1.0 / rank
+                        for evidence in question['evidence']:
+                            if (result['doc_id'], result['page']) != (evidence['doc_id'], evidence['page']):
+                                continue
+                            context_hit |= evidence['quote'] in result['excerpt']
+                            anchor = anchors[result['chunk_id']]
+                            anchor_hit |= evidence['quote'] in anchor
                 measurements.append(dict(id=question['id'], split=question['split'], mode=mode,
                     category=question['category'], hit=bool(reciprocal), reciprocal_rank=reciprocal,
+                    evidence_in_context=context_hit, evidence_in_anchor=anchor_hit,
+                    excerpt_chars=[len(r['excerpt']) for r in response['results']],
+                    anchor_chars=[len(anchors[r['chunk_id']]) for r in response['results']],
                     seconds=elapsed, results=[dict(doc_id=r['doc_id'], page=r['page'],
                                                   chunk_id=r['chunk_id']) for r in response['results']]))
         summary = {}
@@ -51,6 +63,10 @@ def evaluate(data_dir, queries_path, split):
             import math
             summary[mode] = dict(queries=len(subset), hit_at_5=statistics.mean(m['hit'] for m in subset),
                                  mrr_at_5=statistics.mean(m['reciprocal_rank'] for m in subset),
+                                 evidence_in_context_at_5=statistics.mean(m['evidence_in_context'] for m in subset),
+                                 evidence_in_anchor_at_5=statistics.mean(m['evidence_in_anchor'] for m in subset),
+                                 mean_excerpt_chars=statistics.mean(n for m in subset for n in m['excerpt_chars']),
+                                 mean_anchor_chars=statistics.mean(n for m in subset for n in m['anchor_chars']),
                                  p95_seconds=latencies[math.ceil(.95 * len(latencies)) - 1])
         negatives = []
         for query in source['negatives']:

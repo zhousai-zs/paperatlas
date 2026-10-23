@@ -32,12 +32,18 @@ async def run(data_dir):
             listing = unpack(await client.call_tool('list_papers', {}))
             search = unpack(await client.call_tool('search_papers', {'query': 'DPMambaIR DP-SSM fine-grained degradation extractor', 'limit': 5}))
             hit = search['results'][0]
-            page = unpack(await client.call_tool('read_page', {'doc_id': hit['doc_id'], 'page': hit['page']}))
+            page = unpack(await client.call_tool('read_page', {'doc_id': hit['doc_id'], 'page': hit['page'], 'after': 1}))
             assert hit['excerpt'] in page['markdown']
-            repeated = unpack(await client.call_tool('search_papers', {'query': 'SEAR Pruning-Aware Monte Carlo Tree Search', 'limit': 5}))
+            assert hit['source_range']['start'] <= hit['match_range']['start'] < hit['match_range']['end'] <= hit['source_range']['end']
+            assert 'neighboring_pages' in page and 'omitted_pages' in page
+            repeated = unpack(await client.call_tool('search_papers', {'query': 'SEAR Pruning-Aware Monte Carlo Tree Search', 'limit': 5, 'diverse': True}))
             assert repeated['results']
+            from collections import Counter
+            assert max(Counter(r['doc_id'] for r in repeated['results']).values()) <= 2
             return dict(protocol='stdio', tools=[t.name for t in tools.tools], papers=listing['total'],
                         search_title=hit['title'], page=hit['page'], excerpt_verified=True,
+                        expanded_context_range_verified=True, neighbor_request_verified=True,
+                        source_diversity_verified=True,
                         repeated_search=True, elapsed_seconds=time.perf_counter()-start,
                         agent_host_verified=False)
 

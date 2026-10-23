@@ -2,8 +2,10 @@
 import re
 from html import unescape
 from markdown_it import MarkdownIt
+from .references import bibliography_entry
 
-VERSION = 'page-block-v3'
+VERSION = 'page-block-v6'
+TARGET_TOKENS = 350
 PARSER = MarkdownIt('commonmark', {'html': True}).enable('table')
 
 
@@ -27,7 +29,7 @@ class Chunker:
     def count(self, text):
         return len(self.offsets(text))
 
-    def chunks(self, text, title, section=''):
+    def chunks(self, text, title, section='', reference_ranges=()):
         lines = text.splitlines(keepends=True)
         starts = [0]
         for line in lines:
@@ -45,6 +47,11 @@ class Chunker:
                         or fragment.startswith('原图核对：')
                         or not re.search(r'[\w\u4e00-\u9fff]', plain(fragment))):
                     continue
+                # Block-level bibliography detection survives intervening figure headings
+                # and references continuing on later pages. Raw pages remain available.
+                if (any(begin < b and end > a for a, b in reference_ranges)
+                        or bibliography_entry(plain(fragment))):
+                    continue
                 spans.append((begin, end, section, token.type))
         # Math delimiters may span blank paragraphs. Coalesce all overlapping math regions.
         math_spans = [(m.start(), m.end()) for m in re.finditer(r'\$\$.*?\$\$', text, re.S)]
@@ -58,14 +65,14 @@ class Chunker:
         expanded = []
         for a, b, heading, kind in spans:
             fragment = text[a:b]
-            if kind in {'html_block', 'table_open'} and self.count(fragment) > 350 and ('<table' in fragment or kind == 'table_open'):
+            if kind in {'html_block', 'table_open'} and self.count(fragment) > TARGET_TOKENS and ('<table' in fragment or kind == 'table_open'):
                 rows = list(re.finditer(r'<tr\b.*?</tr>' if '<table' in fragment else r'^\|[^\n]*', fragment, re.I | re.S if '<table' in fragment else re.M))
                 if rows:
                     table_headers.append((a, b, plain(rows[0][0])[:300]))
                     group_start, group_end = a, a
                     for row in rows:
                         row_end = a + row.end()
-                        if group_end > group_start and self.count(text[group_start:row_end]) > 350:
+                        if group_end > group_start and self.count(text[group_start:row_end]) > TARGET_TOKENS:
                             expanded.append((group_start, group_end, heading, 'table_fragment'))
                             group_start = a + row.start()
                         group_end = row_end
@@ -75,7 +82,10 @@ class Chunker:
         spans = expanded
         groups = []
         for span in spans:
-            if groups and span[2] == groups[-1][2] and span[3] == groups[-1][3] == 'paragraph_open' and self.count(text[groups[-1][0]:span[1]]) <= 350:
+            if (groups and span[2] == groups[-1][2]
+                    and span[3] == groups[-1][3] == 'paragraph_open'
+                    and not text[groups[-1][1]:span[0]].strip()
+                    and self.count(text[groups[-1][0]:span[1]]) <= TARGET_TOKENS):
                 old = groups[-1]
                 groups[-1] = (old[0], span[1], old[2], old[3])
             else:
@@ -97,10 +107,10 @@ class Chunker:
                     header = plain(match[0])[:300]
             prefix = context + (' / ' + header if header else '') + '\n'
             # Leave ample room for prefixes, tokenizer boundary effects and special tokens.
-            budget = min(350, 490 - self.count('passage: ' + prefix))
+            budget = min(TARGET_TOKENS, 490 - self.count('passage: ' + prefix))
             if budget < 32:
                 prefix = context + '\n'
-                budget = min(350, 490 - self.count('passage: ' + prefix))
+                budget = min(TARGET_TOKENS, 490 - self.count('passage: ' + prefix))
             offsets = self.offsets(text[a:b])
             position = 0
             while position < len(offsets):

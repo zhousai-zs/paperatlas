@@ -50,6 +50,7 @@ def validate(atlas, task, answer, events):
     calls = [item for item in items if item.get('type') == 'mcp_tool_call']
     methods = [item.get('tool') for item in calls if item.get('server') == 'paperatlas']
     read_pairs = set()
+    read_texts = {}
     errors = []
     for item in calls:
         if item.get('server') != 'paperatlas':
@@ -58,7 +59,29 @@ def validate(atlas, task, answer, events):
             args = item.get('arguments', {})
             if isinstance(args, str):
                 args = json.loads(args)
-            read_pairs.add((args.get('doc_id'), args.get('page')))
+            result = item.get('result') or {}
+            if item.get('error') or result.get('isError') or result.get('is_error'):
+                continue
+            payload = result.get('structuredContent') or result.get('structured_content')
+            if not payload:
+                for block in result.get('content', []):
+                    if block.get('type') == 'text':
+                        try:
+                            payload = json.loads(block['text'])
+                        except (ValueError, KeyError):
+                            continue
+                        break
+            if (not isinstance(payload, dict) or payload.get('doc_id') != args.get('doc_id')
+                    or payload.get('page') != args.get('page') or 'markdown' not in payload):
+                continue
+            returned_pages = [payload] + payload.get('neighboring_pages', [])
+            for returned in returned_pages:
+                number = returned.get('page')
+                if (type(number) is int and args['page'] - args.get('before', 0) <= number
+                        <= args['page'] + args.get('after', 0) and 'markdown' in returned):
+                    pair = (args['doc_id'], number)
+                    read_pairs.add(pair)
+                    read_texts[pair] = returned['markdown']
     forbidden = [item.get('type') for item in items
                  if item.get('type') in {'command_execution', 'file_change', 'web_search', 'collab_agent_tool_call'}]
     if forbidden:
@@ -69,6 +92,8 @@ def validate(atlas, task, answer, events):
         pair = (evidence['doc_id'], evidence['page'])
         if pair not in read_pairs:
             errors.append('Cited a page not read in this turn')
+        elif evidence['quote'] not in read_texts[pair]:
+            errors.append('Quote was not present in the actual tool response')
         try:
             page = atlas.read_page(*pair)
             if not evidence['quote'].strip() or evidence['quote'] not in page['markdown']:

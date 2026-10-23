@@ -27,9 +27,12 @@ def main(argv=None):
     search.add_argument('--top-k', type=int, default=5)
     search.add_argument('--mode', choices=['hybrid', 'lexical', 'semantic'], default='hybrid')
     search.add_argument('--doc-id')
+    search.add_argument('--diverse', action='store_true', help='主题比较时分散来源，每篇最多两页')
     read = sub.add_parser('read')
     read.add_argument('doc_id')
     read.add_argument('--page', type=int, required=True)
+    read.add_argument('--before', type=int, default=0)
+    read.add_argument('--after', type=int, default=0)
     for command in [index, listing, search, read]:
         command.add_argument('--json', action='store_true')
     sub.add_parser('mcp')
@@ -51,15 +54,18 @@ def main(argv=None):
             elif args.command == 'list':
                 output = atlas.list_papers(args.limit, args.offset)
             elif args.command == 'search':
-                output = atlas.search_papers(args.query, args.top_k, args.doc_id, args.mode)
+                output = atlas.search_papers(args.query, args.top_k, args.doc_id, args.mode, args.diverse)
             else:
-                output = atlas.read_page(args.doc_id, args.page)
+                output = atlas.read_page(args.doc_id, args.page, args.before, args.after)
         if getattr(args, 'json', False) or args.command in {'init', 'models', 'index', 'list'}:
             print(json.dumps(output, ensure_ascii=False, indent=2))
         elif args.command == 'read':
             print(f"{output['title']} — PDF 第 {output['page']} 页\n" + '\n'.join(output['warnings']))
             print(output['markdown'])
             print(json.dumps(output['source'], ensure_ascii=False, indent=2))
+            for neighbor in output.get('neighboring_pages', []):
+                print(f"\nPDF 第 {neighbor['page']} 页\n" + neighbor['markdown'])
+                print(json.dumps(neighbor['source'], ensure_ascii=False, indent=2))
         else:
             print(output['notice'])
             for item in output['results']:

@@ -19,6 +19,25 @@ def lexical_text(text):
     return ' '.join(tokens)
 
 
+def fuse_pages(rankings, pages):
+    """Fuse the evidence unit we actually return: pages, not arbitrary split IDs."""
+    page_scores, chunk_scores, members = {}, {}, {}
+    for ranking in rankings:
+        seen = set()
+        for position, identity in enumerate(ranking, 1):
+            page = pages[identity]
+            chunk_scores[identity] = chunk_scores.get(identity, 0.0) + 1.0 / (60 + position)
+            members.setdefault(page, set()).add(identity)
+            if page not in seen:
+                seen.add(page)
+                page_scores[page] = page_scores.get(page, 0.0) + 1.0 / (60 + len(seen))
+    output = []
+    for page in sorted(page_scores, key=lambda p: (-page_scores[p], p)):
+        anchor = min(members[page], key=lambda i: (-chunk_scores[i], i))
+        output.append((anchor, page_scores[page]))
+    return output
+
+
 def ranks(database, query, mode, embedder=None, doc_id=None):
     connection = database.conn
     from .query import expand
@@ -51,11 +70,58 @@ def ranks(database, query, mode, embedder=None, doc_id=None):
             scores = vectors @ embedder.encode([query], query=True)[0]
             order = np.argsort(-scores, kind='stable')[:50]
             semantic = [rows[int(i)]['id'] for i in order]
+    if mode == 'hybrid':
+        identities = list(dict.fromkeys(lexical + semantic))
+        if not identities:
+            return []
+        placeholders = ','.join('?' for _ in identities)
+        pages = {r['id']: (r['doc_id'], r['page']) for r in connection.execute(
+            f'SELECT id,doc_id,page FROM chunks WHERE id IN ({placeholders})', identities)}
+        return fuse_pages([lexical, semantic], pages)
     scores = {}
     for ranking in [lexical, semantic]:
         for position, identity in enumerate(ranking, 1):
             scores[identity] = scores.get(identity, 0.0) + 1.0 / (60 + position)
     return sorted(scores.items(), key=lambda p: (-p[1], p[0]))
+
+
+def context_window(database, row, max_chars=6000):
+    """Expand a retrieval anchor to nearby same-section source blocks on its page.
+
+    Gaps containing excluded text (including bibliography) and headings are hard
+    boundaries. Return literal source offsets; do not stitch unrelated passages.
+    """
+    text = database.conn.execute('SELECT text FROM pages WHERE doc_id=? AND page=?',
+                                (row['doc_id'], row['page'])).fetchone()['text']
+    siblings = database.conn.execute('SELECT id,start,end,section FROM chunks '
+        'WHERE doc_id=? AND page=? ORDER BY start,end,id', (row['doc_id'], row['page'])).fetchall()
+    position = next(i for i, sibling in enumerate(siblings) if sibling['id'] == row['id'])
+    left = right = position
+    start, end = row['start'], row['end']
+    while True:
+        choices = []
+        if left > 0:
+            previous = siblings[left - 1]
+            if (previous['section'] == row['section']
+                    and not text[previous['end']:start].strip()
+                    and end - previous['start'] <= max_chars):
+                choices.append((start - previous['start'], 'left', previous))
+        if right + 1 < len(siblings):
+            following = siblings[right + 1]
+            if (following['section'] == row['section']
+                    and not text[end:following['start']].strip()
+                    and following['end'] - start <= max_chars):
+                choices.append((following['end'] - end, 'right', following))
+        if not choices:
+            break
+        _, direction, candidate = min(choices, key=lambda c: (c[0], c[1]))
+        if direction == 'left':
+            left -= 1
+            start = min(start, candidate['start'])
+        else:
+            right += 1
+            end = max(end, candidate['end'])
+    return start, end, text[start:end]
 
 
 def result(database, identity, score):
@@ -67,9 +133,11 @@ def result(database, identity, score):
     root = Path(doc['root'])
     evidence = load_json(root, 'evidence.json', optional=True) or []
     sources = [dict(e, image=str(safe_path(root, e['image']))) for e in evidence if e['page'] == row['page']]
+    start, end, excerpt = context_window(database, row)
     return dict(doc_id=row['doc_id'], title=doc['title'], page=row['page'], section=row['section'],
-                chunk_id=row['id'], score=score, excerpt=row['excerpt'],
-                source_range=dict(start=row['start'], end=row['end']), status=metadata['status'],
+                chunk_id=row['id'], score=score, excerpt=excerpt,
+                source_range=dict(start=start, end=end),
+                match_range=dict(start=row['start'], end=row['end']), status=metadata['status'],
                 warnings=metadata['warnings'] + json.loads(row['warnings']),
                 source=dict(pdf=str(safe_path(root, 'source.pdf')),
                             page_image=str(safe_path(root, f"pages/page-{row['page']:04d}.png")), evidence=sources))
