@@ -7,6 +7,12 @@ import pytest
 from paperatlas.core import Atlas
 
 
+def pytest_configure(config):
+    # A clean checkout has no ignored .cache parent; pytest creates only basetemp.
+    if config.option.basetemp:
+        Path(config.option.basetemp).parent.mkdir(parents=True, exist_ok=True)
+
+
 @pytest.fixture
 def bundle(tmp_path):
     root = tmp_path / 'papers' / 'paper'
