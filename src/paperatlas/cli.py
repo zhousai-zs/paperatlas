@@ -40,6 +40,10 @@ def main(argv=None):
     for command in [index, listing, search, read]:
         command.add_argument('--json', action='store_true')
     sub.add_parser('mcp')
+    web = sub.add_parser('web', help='本机索引管理页面，与 MCP 分开运行')
+    web.add_argument('--host', default='127.0.0.1')
+    web.add_argument('--port', type=int, default=8765)
+    web.add_argument('--no-open', action='store_true', help='不自动打开浏览器')
     args = parser.parse_args(argv)
     atlas = None
     try:
@@ -48,6 +52,10 @@ def main(argv=None):
         elif args.command == 'mcp':
             from .mcp_server import serve
             serve(args.data_dir)
+            return 0
+        elif args.command == 'web':
+            from .web import serve
+            serve(args.data_dir, args.host, args.port, open_browser=not args.no_open)
             return 0
         else:
             atlas = Atlas(args.data_dir, create=args.command == 'init')

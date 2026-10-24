@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>索引 · PaperAtlas</title>
+<style>
+:root {
+  --bg: #f3f1eb;
+  --panel: #faf9f6;
+  --ink: #1d1c1a;
+  --muted: #6f6a63;
+  --line: #e0dbd2;
+  --warn: #8d4b32;
+  --bad: #8d3030;
+  --ok: #3e5648;
+  --select: #efeae1;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+  font: 14px/1.5 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  padding: 16px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.06em; }
+h1 span { margin-left: 8px; color: var(--muted); font-size: 13px; font-weight: 400; letter-spacing: 0; }
+#counts, #sub { margin: 2px 0 0; color: var(--muted); }
+#sub { font-size: 12px; }
+#find { display: flex; gap: 8px; align-items: center; margin: 0; }
+#find label { color: var(--muted); }
+input[type="search"] {
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d3cdc3;
+  padding: 5px 8px;
+  min-width: 220px;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d3cdc3;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button:hover { background: var(--select); }
+button:disabled { color: #a39e96; cursor: default; background: #fff; }
+button:focus-visible, input:focus-visible { outline: 2px solid #8d7b62; outline-offset: 1px; }
+button.danger { color: var(--bad); border-color: #e0c8c4; }
+#notice { padding: 10px 22px; background: #f6f1e6; border-bottom: 1px solid var(--line); }
+#notice p { margin: 0; }
+#notice .names { margin: 6px 0 0; padding-left: 18px; }
+#notice .row { margin-top: 8px; }
+.workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+aside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.tools { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+.tools input { width: 100%; min-width: 0; }
+.row { display: flex; gap: 8px; }
+.row button { flex: 1; }
+#list { overflow: auto; padding: 4px 0; }
+button.item, button.hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  padding: 8px 12px;
+}
+button.item.active { background: #e7e1d6; border-left-color: var(--ink); }
+button.hit { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.item-title, .hit-title { display: block; }
+.item-meta, .hit-meta, .excerpt { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.excerpt { white-space: pre-wrap; font-size: 13px; color: var(--ink); }
+article { overflow: auto; min-width: 0; padding: 20px 28px 72px; }
+article h2 { margin: 0 0 6px; font-size: 22px; font-weight: 600; }
+article h3 { margin: 22px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.path, .idline { font-family: Consolas, "Cascadia Mono", "Microsoft YaHei", monospace; font-size: 12px; word-break: break-all; color: var(--muted); }
+.warn { color: var(--warn); margin: 6px 0; }
+.pager { display: flex; gap: 8px; align-items: center; margin: 14px 0; }
+pre.page, .chunk pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, "Cascadia Mono", "Microsoft YaHei", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+pre.page { background: #fff; border: 1px solid var(--line); padding: 14px 16px; }
+.chunk { margin-top: 12px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.chunk.focus { background: #f7f1e4; }
+.chunk-head { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+details { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+details summary { cursor: pointer; }
+details p { margin: 6px 0 0; }
+.empty { color: var(--muted); padding: 8px 12px; }
+.tag-bad { color: var(--bad); }
+.tag-warn { color: var(--warn); }
+.tag-ok { color: var(--ok); }
+@media (max-width: 800px) {
+  header { flex-direction: column; align-items: stretch; }
+  .workspace { grid-template-columns: 1fr; height: auto; }
+  aside { max-height: 42vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>索引<span>PaperAtlas</span></h1>
+    <p id="counts">正在读取</p>
+    <p id="sub"></p>
+  </div>
+  <form id="find">
+    <label for="q">在片段中查找</label>
+    <input id="q" type="search" autocomplete="off" spellcheck="false">
+    <button type="submit">查找</button>
+  </form>
+</header>
+<div id="notice" hidden></div>
+<div class="workspace">
+  <aside>
+    <div class="tools">
+      <input id="filter" type="search" placeholder="筛选标题或路径" autocomplete="off">
+      <div class="row">
+        <button type="button" id="check">检查来源</button>
+        <button type="button" id="prune">移除缺失</button>
+      </div>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <article id="detail"><p class="empty">选择一篇论文。</p></article>
+</div>
+<script>
+const STATUS = {complete: '完成', needs_review: '需复核'};
+const SOURCE = {missing: '来源缺失', changed: '来源已变'};
+const counts = document.getElementById('counts');
+const sub = document.getElementById('sub');
+const notice = document.getElementById('notice');
+const list = document.getElementById('list');
+const detail = document.getElementById('detail');
+const filter = document.getElementById('filter');
+let papers = [];
+let sources = null;
+let currentId = null;
+
+function say(message, node) {
+  notice.hidden = false;
+  notice.replaceChildren();
+  const text = document.createElement('p');
+  text.textContent = message;
+  notice.append(text);
+  if (node) notice.append(node);
+}
+
+function clearNotice() {
+  notice.hidden = true;
+  notice.replaceChildren();
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '请求失败');
+  return data;
+}
+
+function post(path, payload) {
+  return api(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+}
+
+function statusText(paper) {
+  const bits = [STATUS[paper.status] || paper.status || '未知', paper.pages + ' 页', paper.chunks + ' 片段'];
+  if (paper.vectors !== paper.chunks) bits.push('向量 ' + paper.vectors + '/' + paper.chunks);
+  else if (paper.vectors) bits.push('有向量');
+  if (sources && sources[paper.doc_id]) {
+    bits.push(sources[paper.doc_id].problem ? SOURCE[sources[paper.doc_id].problem] : '来源正常');
+  }
+  return bits.join(' · ');
+}
+
+function renderCounts(summary) {
+  counts.textContent = summary.documents + ' 篇 · ' + summary.pages + ' 页 · ' + summary.chunks + ' 片段 · 向量 ' + summary.vectors + '/' + summary.chunks;
+  const statuses = Object.entries(summary.statuses).map(([key, count]) => (STATUS[key] || key) + ' ' + count);
+  sub.textContent = statuses.concat(summary.modes).join(' · ');
+  sub.title = [summary.database].concat(summary.models).join('\n');
+}
+
+function renderList() {
+  const needle = filter.value.trim().toLowerCase();
+  const visible = papers.filter(paper => !needle || (paper.title + '\n' + paper.root + '\n' + paper.doc_id).toLowerCase().includes(needle));
+  list.replaceChildren();
+  if (!visible.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = papers.length ? '没有匹配的论文。' : '索引是空的。先用 index 导入。';
+    list.append(empty);
+    return;
+  }
+  for (const paper of visible) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'item' + (paper.doc_id === currentId ? ' active' : '');
+    button.dataset.id = paper.doc_id;
+    const title = document.createElement('span');
+    title.className = 'item-title';
+    title.textContent = paper.title;
+    const meta = document.createElement('span');
+    meta.className = 'item-meta';
+    meta.textContent = statusText(paper);
+    const source = sources && sources[paper.doc_id];
+    if (source && source.problem === 'missing') meta.classList.add('tag-bad');
+    else if (source && source.problem === 'changed') meta.classList.add('tag-warn');
+    button.append(title, meta);
+    list.append(button);
+  }
+}
+
+function field(className, text) {
+  const node = document.createElement('p');
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+function warningText(warning) {
+  const prefix = 'needs_review: ';
+  if (!warning.startsWith(prefix)) return warning;
+  try {
+    const issues = JSON.parse(warning.slice(prefix.length));
+    const codes = issues.map(item => item && item.code ? item.code : JSON.stringify(item));
+    return '需复核：' + codes.join('、');
+  } catch (err) {
+    return warning;
+  }
+}
+
+function renderPaper(paper, body, focusStart) {
+  detail.replaceChildren();
+  const title = document.createElement('h2');
+  title.textContent = paper.title;
+  detail.append(title);
+  detail.append(field('item-meta', [STATUS[paper.status] || paper.status, paper.index_label].filter(Boolean).join(' · ')));
+  detail.append(field('path', paper.root));
+  const idRow = document.createElement('p');
+  idRow.className = 'idline';
+  idRow.textContent = paper.doc_id + '  ';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = '复制编号';
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(paper.doc_id);
+      say('已复制编号。');
+    } catch (err) {
+      say(paper.doc_id);
+    }
+  });
+  idRow.append(copy);
+  detail.append(idRow);
+  for (const warning of paper.warnings) detail.append(field('warn', warningText(warning)));
+  const extra = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = '索引信息';
+  extra.append(summary);
+  extra.append(field('', paper.index_key));
+  if (paper.models.length) extra.append(field('', paper.models.join('，')));
+  if (paper.integrity) {
+    const issues = paper.integrity.issues.length ? paper.integrity.issues.join('、') : '无';
+    extra.append(field('', '完整性 passed=' + paper.integrity.passed + '，assets_passed=' + paper.integrity.assets_passed + '，问题 ' + issues));
+  }
+  detail.append(extra);
+
+  if (paper.pages.length) {
+    const index = Math.max(0, paper.pages.findIndex(item => item.page === body.page));
+    const pager = document.createElement('div');
+    pager.className = 'pager';
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.textContent = '上一页';
+    prev.disabled = index <= 0;
+    prev.addEventListener('click', () => openPaper(paper.doc_id, paper.pages[index - 1].page));
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = '下一页';
+    next.disabled = index >= paper.pages.length - 1;
+    next.addEventListener('click', () => openPaper(paper.doc_id, paper.pages[index + 1].page));
+    const label = document.createElement('span');
+    label.textContent = 'PDF 第 ' + body.page + ' 页 · ' + body.chars + ' 字 · 本页 ' + body.chunks.length + ' 个片段';
+    pager.append(prev, label, next);
+    detail.append(pager);
+    const text = document.createElement('pre');
+    text.className = 'page';
+    text.textContent = body.text;
+    detail.append(text);
+  }
+
+  const heading = document.createElement('h3');
+  heading.textContent = '片段';
+  detail.append(heading);
+  if (!body.chunks.length) detail.append(field('empty', '这一页没有入库片段。'));
+  for (const chunk of body.chunks) {
+    const block = document.createElement('section');
+    const focused = focusStart != null && chunk.start <= focusStart && focusStart < chunk.end;
+    block.className = 'chunk' + (focused ? ' focus' : '');
+    const head = document.createElement('p');
+    head.className = 'chunk-head';
+    const bits = [];
+    if (chunk.section) bits.push(chunk.section);
+    bits.push('字符 ' + chunk.start + '–' + chunk.end);
+    bits.push(chunk.has_vector ? '有向量' : '无向量');
+    head.textContent = bits.join(' · ');
+    const excerpt = document.createElement('pre');
+    excerpt.textContent = chunk.excerpt;
+    block.append(head, excerpt);
+    for (const warning of chunk.warnings) block.append(field('warn', warning));
+    detail.append(block);
+    if (focused) block.scrollIntoView({block: 'nearest'});
+  }
+
+  const remove = document.createElement('p');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'danger';
+  button.textContent = '从索引移除';
+  button.addEventListener('click', () => confirmRemove(paper));
+  remove.append(button);
+  detail.append(remove);
+}
+
+async function openPaper(id, page, focusStart) {
+  const paper = await api('/api/paper?doc_id=' + encodeURIComponent(id));
+  const selected = page || (paper.pages[0] && paper.pages[0].page) || 1;
+  const body = paper.pages.length ? await api('/api/page?doc_id=' + encodeURIComponent(id) + '&page=' + selected) : {page: selected, chars: 0, text: '', chunks: []};
+  currentId = id;
+  renderList();
+  renderPaper(paper, body, focusStart);
+}
+
+function renderHits(data) {
+  currentId = null;
+  renderList();
+  detail.replaceChildren();
+  const title = document.createElement('h2');
+  title.textContent = '查找结果';
+  detail.append(title);
+  for (const warning of data.warnings) detail.append(field('warn', warning));
+  if (!data.hits.length) {
+    detail.append(field('empty', '没有命中。'));
+    return;
+  }
+  for (const hit of data.hits) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hit';
+    const name = document.createElement('span');
+    name.className = 'hit-title';
+    name.textContent = hit.title;
+    const meta = document.createElement('span');
+    meta.className = 'hit-meta';
+    meta.textContent = ['PDF 第 ' + hit.page + ' 页', hit.section].filter(Boolean).join(' · ');
+    const excerpt = document.createElement('span');
+    excerpt.className = 'excerpt';
+    excerpt.textContent = hit.excerpt;
+    button.append(name, meta, excerpt);
+    button.addEventListener('click', () => openPaper(hit.doc_id, hit.page, hit.start).catch(err => say(err.message)));
+    detail.append(button);
+  }
+}
+
+function confirmRemove(paper) {
+  const actions = document.createElement('div');
+  actions.className = 'row';
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'danger';
+  ok.textContent = '确认移除';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', clearNotice);
+  ok.addEventListener('click', async () => {
+    ok.disabled = true;
+    try {
+      await post('/api/remove', {doc_ids: [paper.doc_id]});
+      currentId = null;
+      detail.replaceChildren();
+      detail.append(field('empty', '已从索引移除。来源文件还在。'));
+      clearNotice();
+      await refresh();
+    } catch (err) {
+      ok.disabled = false;
+      say(err.message);
+    }
+  });
+  actions.append(ok, cancel);
+  say('从索引移除「' + paper.title + '」？来源文件夹不会改动。', actions);
+}
+
+async function refresh() {
+  const [summary, listing] = await Promise.all([api('/api/summary'), api('/api/papers')]);
+  papers = listing.papers;
+  renderCounts(summary);
+  renderList();
+}
+
+list.addEventListener('click', event => {
+  const button = event.target.closest('button.item');
+  if (!button) return;
+  openPaper(button.dataset.id).catch(err => say(err.message));
+});
+filter.addEventListener('input', renderList);
+document.getElementById('find').addEventListener('submit', event => {
+  event.preventDefault();
+  const query = document.getElementById('q').value.trim();
+  if (!query) return;
+  api('/api/search?q=' + encodeURIComponent(query) + '&limit=10').then(renderHits).catch(err => say(err.message));
+});
+document.getElementById('check').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const report = await api('/api/sources');
+    sources = {};
+    for (const item of report.papers) sources[item.doc_id] = item;
+    renderList();
+    say('已检查 ' + report.checked + ' 篇。缺失 ' + report.missing + '，已变化 ' + report.changed + '。');
+  } catch (err) {
+    say(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+document.getElementById('prune').addEventListener('click', async () => {
+  const report = await post('/api/prune', {dry_run: true}).catch(err => { say(err.message); return null; });
+  if (!report) return;
+  if (!report.candidates.length) {
+    say('没有来源缺失的论文。来源已变化的不会在这里移除。');
+    return;
+  }
+  const names = document.createElement('ul');
+  names.className = 'names';
+  for (const item of report.candidates) {
+    const line = document.createElement('li');
+    line.textContent = item.title;
+    names.append(line);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'row';
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'danger';
+  ok.textContent = '确认移除这 ' + report.candidates.length + ' 篇';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', clearNotice);
+  ok.addEventListener('click', async () => {
+    ok.disabled = true;
+    try {
+      await post('/api/prune', {dry_run: false});
+      currentId = null;
+      detail.replaceChildren();
+      detail.append(field('empty', '选择一篇论文。'));
+      sources = null;
+      clearNotice();
+      await refresh();
+    } catch (err) {
+      ok.disabled = false;
+      say(err.message);
+    }
+  });
+  actions.append(ok, cancel);
+  const box = document.createElement('div');
+  box.append(names, actions);
+  say('这些论文的来源目录已经不可用。确认后只从索引移除。', box);
+});
+
+refresh().catch(err => say(err.message));
+</script>
+</body>
+</html>

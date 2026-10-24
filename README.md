@@ -90,6 +90,16 @@ PaperAtlas 本地检索不调用生成模型。接入 Agent 后，相关正文�
 
 搜索的 `excerpt` 默认扩展为同页、同小节的相邻原文，最多约 6000 字符；`source_range` 对应该连续原文，`match_range` 是其中真正命中的检索块。不会把不同页或被排除的参考文献拼成一段。若需要更完整的方法解释，可限定 `doc_id` 再搜索，并用 `read_page(..., before=1, after=1)` 获取跨页上下文。相邻页完整返回；主页面与邻页共用 24000 字符预算，放不下的邻页列入 `omitted_pages`，可单独读取。单独读取主页面的原有行为保持完整，不截断表格或公式。
 
+## 索引管理页面
+
+查看和清理已经入库的论文。页面与 MCP 分开运行，只监听本机，不加载语义模型，也不修改来源文件。导入仍使用 `index`。
+
+```powershell
+.\paperatlas.cmd web
+```
+
+浏览器打开 `http://127.0.0.1:8765/`。结束该进程即关闭页面。`--no-open` 不自动打开浏览器，`--port` 可改端口。MCP 继续单独执行 `.\paperatlas.cmd mcp`。
+
 ## 输入契约和项目边界
 
 只支持 `paperbridge.document` / `schema_version=1`，读取准备好的 `document.md`；要求源 PDF 哈希、JSON 页码与 Markdown 页标一致，原页图片和本地引用可定位。`integrity.json` 可缺省，存在但明确失败时拒绝导入。证据清单可缺省，存在时校验页码和路径。

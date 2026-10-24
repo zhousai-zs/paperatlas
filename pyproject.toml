@@ -20,6 +20,12 @@ paperatlas = "paperatlas.cli:main"
 Repository = "https://github.com/zhousai-zs/paperatlas"
 Issues = "https://github.com/zhousai-zs/paperatlas/issues"
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/paperatlas/static/index.html" = "paperatlas/static/index.html"
+
+[tool.hatch.build.targets.sdist.force-include]
+"src/paperatlas/static/index.html" = "src/paperatlas/static/index.html"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
