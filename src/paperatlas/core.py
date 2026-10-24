@@ -6,7 +6,7 @@ import sqlite3
 from .chunking import Chunker
 from .embedding import Embedder
 from .errors import AtlasError
-from .source import discover, fingerprint, read_bundle, digest, safe_path, load_json
+from .source import REQUIRED, discover, fingerprint, read_bundle, digest, safe_path, load_json
 from .storage import Database
 
 
@@ -75,15 +75,51 @@ class Atlas:
                     papers=[dict(doc_id=r['doc_id'], title=r['title'], pages=r['pages'], chunks=r['chunks'],
                                  status=json.loads(r['metadata'])['status'], warnings=json.loads(r['metadata'])['warnings']) for r in rows])
 
-    def _fresh(self, doc_id):
-        doc = self.db.document(doc_id)
+    STALE = dict(missing='源文件不可用；请恢复来源目录后重新 index，或用 remove/prune 移出索引。',
+                 changed='源文件已变化，索引过期；请重新 index 后读取。')
+
+    def _source_problem(self, doc):
+        """Return None for a usable source, 'missing' when it cannot be read, or 'changed'."""
         root = Path(doc['root'])
         try:
-            if fingerprint(root) != doc['fingerprint'] or digest(safe_path(root, 'source.pdf')) != doc_id.removeprefix('sha256:'):
-                raise AtlasError('源文件已变化，索引过期；请重新 index 后读取。')
-        except OSError as exc:
-            raise AtlasError('源文件不可用；请恢复来源目录或重新 index。') from exc
+            if not all((root / name).is_file() for name in REQUIRED):
+                return 'missing'
+            if (fingerprint(root) != doc['fingerprint']
+                    or digest(safe_path(root, 'source.pdf')) != doc['doc_id'].removeprefix('sha256:')):
+                return 'changed'
+        except (OSError, AtlasError):
+            return 'missing'
+        return None
+
+    def _fresh(self, doc_id):
+        doc = self.db.document(doc_id)
+        problem = self._source_problem(doc)
+        if problem:
+            raise AtlasError(self.STALE[problem])
         return doc
+
+    def remove(self, doc_ids):
+        missing = [d for d in doc_ids if self.db.conn.execute('SELECT 1 FROM documents WHERE doc_id=?', (d,)).fetchone() is None]
+        if missing:
+            raise AtlasError('论文 ID 不存在；使用 list 查看完整 doc_id: ' + ', '.join(missing))
+        removed = []
+        with self.db.conn:
+            for doc_id in dict.fromkeys(doc_ids):
+                doc = self.db.document(doc_id)
+                # Pages, chunks and FTS rows follow through cascades and the delete trigger.
+                self.db.conn.execute('DELETE FROM documents WHERE doc_id=?', (doc_id,))
+                removed.append(dict(doc_id=doc_id, title=doc['title'], path=doc['root']))
+        return dict(removed=removed)
+
+    def prune(self, dry_run=False):
+        """Drop documents whose source bundle is gone; changed sources need index, not pruning."""
+        candidates = [dict(doc_id=r['doc_id'], title=r['title'], path=r['root'])
+                      for r in self.db.conn.execute('SELECT * FROM documents ORDER BY title,doc_id')
+                      if self._source_problem(dict(r)) == 'missing']
+        if dry_run:
+            return dict(dry_run=True, candidates=candidates)
+        removed = self.remove([c['doc_id'] for c in candidates])['removed'] if candidates else []
+        return dict(dry_run=False, removed=removed)
 
     def search_papers(self, query, limit=5, doc_id=None, mode='hybrid', diverse=False):
         if not isinstance(query, str) or len(query) > 4000 or not query.strip():
@@ -91,28 +127,37 @@ class Atlas:
         if not 1 <= limit <= 50 or mode not in {'lexical', 'semantic', 'hybrid'}:
             raise AtlasError('limit 必须为 1–50，模式为 lexical/semantic/hybrid')
         if doc_id:
-            self.db.document(doc_id)
+            self._fresh(doc_id)
         from .retrieval import ranks, result
-        ranked = ranks(self.db, query, mode, self.embedder if mode != 'lexical' else None, doc_id)
-        checked, results, seen_pages, paper_counts = set(), [], set(), {}
+        warnings = []
+        ranked = ranks(self.db, query, mode, self.embedder if mode != 'lexical' else None, doc_id, warnings)
+        checked, stale, results, seen_pages, paper_counts = {doc_id} if doc_id else set(), {}, [], set(), {}
         for identity, score in ranked:
             row = self.db.conn.execute('SELECT doc_id,page FROM chunks WHERE id=?', (identity,)).fetchone()
             page_key = (row['doc_id'], row['page'])
-            if page_key in seen_pages:
+            if page_key in seen_pages or row['doc_id'] in stale:
                 continue
             # Topic searches need evidence across papers; targeted searches may
             # return as many pages from the selected paper as the caller requests.
             if diverse and not doc_id and paper_counts.get(row['doc_id'], 0) >= 2:
                 continue
             if row['doc_id'] not in checked:
-                self._fresh(row['doc_id'])
+                doc = self.db.document(row['doc_id'])
+                problem = self._source_problem(doc)
+                if problem:
+                    # Never mix stale text into results, but keep other papers' evidence usable.
+                    stale[row['doc_id']] = dict(doc_id=row['doc_id'], title=doc['title'], path=doc['root'],
+                                                reason=problem, message=self.STALE[problem])
+                    continue
                 checked.add(row['doc_id'])
             results.append(result(self.db, identity, score))
             seen_pages.add(page_key)
             paper_counts[row['doc_id']] = paper_counts.get(row['doc_id'], 0) + 1
             if len(results) == limit:
                 break
-        return dict(query=query, mode=mode, results=results,
+        if stale:
+            warnings.append(f'已跳过 {len(stale)} 篇来源失效的论文，见 stale_documents；其结果未返回。')
+        return dict(query=query, mode=mode, results=results, warnings=warnings, stale_documents=list(stale.values()),
                     notice='结果为相关候选；排序分数不是事实置信度。excerpt 是连续扩展原文，match_range 是定位块。'
                            '回答前需读取原页；解释跨页时用 read_page(before=1, after=1)，信息不足时限定 doc_id 或换词继续检索。'
                            '主题比较可设 diverse=true 分散来源；单篇深入请指定 doc_id。'

@@ -33,6 +33,10 @@ def main(argv=None):
     read.add_argument('--page', type=int, required=True)
     read.add_argument('--before', type=int, default=0)
     read.add_argument('--after', type=int, default=0)
+    remove = sub.add_parser('remove', help='从索引移除论文；不修改来源文件')
+    remove.add_argument('doc_ids', nargs='+', metavar='doc_id')
+    prune = sub.add_parser('prune', help='移除来源目录已不可用的论文；来源变化的论文请重新 index')
+    prune.add_argument('--dry-run', action='store_true')
     for command in [index, listing, search, read]:
         command.add_argument('--json', action='store_true')
     sub.add_parser('mcp')
@@ -53,11 +57,15 @@ def main(argv=None):
                 output = atlas.index(args.path, args.mode)
             elif args.command == 'list':
                 output = atlas.list_papers(args.limit, args.offset)
+            elif args.command == 'remove':
+                output = atlas.remove(args.doc_ids)
+            elif args.command == 'prune':
+                output = atlas.prune(args.dry_run)
             elif args.command == 'search':
                 output = atlas.search_papers(args.query, args.top_k, args.doc_id, args.mode, args.diverse)
             else:
                 output = atlas.read_page(args.doc_id, args.page, args.before, args.after)
-        if getattr(args, 'json', False) or args.command in {'init', 'models', 'index', 'list'}:
+        if getattr(args, 'json', False) or args.command in {'init', 'models', 'index', 'list', 'remove', 'prune'}:
             print(json.dumps(output, ensure_ascii=False, indent=2))
         elif args.command == 'read':
             print(f"{output['title']} — PDF 第 {output['page']} 页\n" + '\n'.join(output['warnings']))
@@ -68,6 +76,10 @@ def main(argv=None):
                 print(json.dumps(neighbor['source'], ensure_ascii=False, indent=2))
         else:
             print(output['notice'])
+            for warning in output['warnings']:
+                print(warning)
+            for doc in output['stale_documents']:
+                print(f"已跳过: {doc['title']} ({doc['doc_id']}) — {doc['message']}")
             for item in output['results']:
                 print(f"\n{item['title']} — PDF 第 {item['page']} 页 [{item['status']}]\n{item['doc_id']}\n{item['excerpt']}\n{item['source']['page_image']}")
                 print('\n'.join(item['warnings']))

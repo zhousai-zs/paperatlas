@@ -5,6 +5,18 @@ from pathlib import Path
 from .errors import AtlasError
 
 MODEL_ID = 'intfloat/multilingual-e5-small'
+MAX_TOKENS = 512
+
+
+def fit_query(tokenizer, text, prefix='query: '):
+    """Cut text at a token boundary so prefix, text and special tokens fit the model."""
+    # Margin for tokenizer boundary effects when prefix and text are joined.
+    budget = MAX_TOKENS - 2 - len(tokenizer(prefix, add_special_tokens=False)['input_ids']) - 4
+    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True,
+                        verbose=False)['offset_mapping']
+    if len(offsets) <= budget:
+        return text
+    return text[:offsets[budget - 1][1]]
 
 
 def prepare(data_dir, revision='main'):
@@ -45,7 +57,7 @@ class Embedder:
     def encode(self, texts, query=False):
         prefix = 'query: ' if query else 'passage: '
         inputs = [prefix + t for t in texts]
-        if any(len(self.tokenizer.encode(t)) > 512 for t in inputs):
+        if any(len(self.tokenizer.encode(t)) > MAX_TOKENS for t in inputs):
             raise AtlasError('模型输入超过 512 tokens；请缩短查询或重新切块。')
         return self.model.encode(inputs, normalize_embeddings=True, batch_size=16,
                                  show_progress_bar=False, convert_to_numpy=True).astype('float32')

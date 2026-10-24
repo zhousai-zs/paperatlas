@@ -59,3 +59,31 @@ def test_reference_urls_and_short_continuations_keep_original_offsets():
                                     dict(type='ref_text', content='28 208–28 220.')])
     assert len(ranges) == 2
     assert not Chunker().chunks(text, 'Paper', reference_ranges=ranges)[0]
+
+
+def test_numbered_body_lists_citing_venues_are_not_bibliography():
+    text = ('# Contributions\n\n'
+            '1. Unlike PromptIR (Potlapalli et al., NeurIPS 2023), we handle unknown mixtures.\n'
+            '2. We evaluate on the CVPR 2024 benchmark and outperform baselines.\n\n'
+            '[3] Smith, J.: Heuristic-looking paragraph in IEEE Transactions 2021.\n')
+    chunks, _ = Chunker().chunks(text, 'Paper')
+    body = ''.join(c['excerpt'] for c in chunks)
+    assert 'Potlapalli et al.' in body and 'CVPR 2024 benchmark' in body and 'Smith' in body
+
+
+def test_bibliography_fallback_applies_in_reference_context_only():
+    entry = '[12] Smith, J., Lee, K.: Unaligned restoration entry. In: CVPR (2021).'
+    # A numbered or upper-case References heading, including continuation pages.
+    for heading in ['# References', '# 7. REFERENCES', '# 参考文献']:
+        assert not Chunker().chunks(f'{heading}\n\n{entry}\n', 'Paper')[0]
+    assert not Chunker().chunks(entry + '\n', 'Paper', 'References')[0]
+    # Directly after aligned entries, even without a heading (e.g. an interrupting figure title).
+    aligned = '[11] Zhang, C.: Aligned entry. In: ECCV (2022).'
+    text = f'# Figure 3\n\n{aligned}\n\n{entry}\n\nBody resumes in 2023 per Smith et al.\n'
+    ranges = reference_ranges(text, [dict(type='ref_text', content=aligned)])
+    chunks, _ = Chunker().chunks(text, 'Paper', reference_ranges=ranges)
+    assert [c['excerpt'].strip() for c in chunks] == ['Body resumes in 2023 per Smith et al.']
+    # A new heading ends the bibliography context.
+    text = f'# References\n\n{entry}\n\n# Appendix\n\n1. Ablation following Smith et al. (CVPR 2021).\n'
+    chunks, section = Chunker().chunks(text, 'Paper')
+    assert section == 'Appendix' and len(chunks) == 1 and 'Ablation' in chunks[0]['excerpt']

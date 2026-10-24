@@ -127,6 +127,11 @@ def test_mcp_database_connection_really_read_only(atlas):
 
 
 def test_search_expands_context_without_including_excluded_bibliography(atlas, bundle):
+    # An isolated citation in a body section is excluded through upstream ref_text alignment.
+    document = json.loads((bundle / 'document.json').read_text('utf-8'))
+    document['pages'][0]['blocks'].append(
+        dict(type='ref_text', content='99. Zhang, C.: Unrelated restoration work. In: CVPR (2023).'))
+    (bundle / 'document.json').write_text(json.dumps(document), 'utf-8')
     text = ('<!-- source_page: 1 -->\n# Method\n\n'
             + 'Background context for restoration. ' * 60 + '\n\n'
             + 'UniqueAnchor explains the central mechanism. ' * 30 + '\n\n'
@@ -182,3 +187,91 @@ def test_topic_search_spreads_evidence_and_doc_filter_allows_deeper_reading(atla
     assert len(hits) == 4 and len({h['doc_id'] for h in hits}) == 2
     assert len(atlas.search_papers('restoration', doc_id=first, mode='lexical', diverse=True)['results']) == 4
     assert len(atlas.search_papers('restoration', mode='lexical')['results']) == 5
+
+
+def copy_bundle(bundle, name, pdf):
+    copy = bundle.parent / name
+    shutil.copytree(bundle, copy)
+    (copy / 'source.pdf').write_bytes(pdf)
+    document = json.loads((copy / 'document.json').read_text('utf-8'))
+    document['source_sha256'] = hashlib.sha256(pdf).hexdigest()
+    (copy / 'document.json').write_text(json.dumps(document), 'utf-8')
+    return copy
+
+
+def test_stale_sources_are_skipped_without_failing_search(atlas, bundle):
+    kept = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    deleted_root = copy_bundle(bundle, 'deleted', b'%PDF-deleted')
+    changed_root = copy_bundle(bundle, 'changed', b'%PDF-changed')
+    deleted = atlas.index(deleted_root, 'lexical')['results'][0]['doc_id']
+    changed = atlas.index(changed_root, 'lexical')['results'][0]['doc_id']
+    shutil.rmtree(deleted_root)
+    path = changed_root / 'document.md'
+    path.write_text(path.read_text('utf-8') + '\nEdited\n', 'utf-8')
+    response = atlas.search_papers('PromptIR', mode='lexical')
+    assert {r['doc_id'] for r in response['results']} == {kept}
+    assert {(d['doc_id'], d['reason']) for d in response['stale_documents']} == {(deleted, 'missing'), (changed, 'changed')}
+    assert any('stale_documents' in w for w in response['warnings'])
+    # Explicitly targeting or reading a stale paper still fails loudly.
+    with pytest.raises(AtlasError, match='remove/prune'):
+        atlas.search_papers('PromptIR', mode='lexical', doc_id=deleted)
+    with pytest.raises(AtlasError, match='过期'):
+        atlas.read_page(changed, 1)
+    clean = atlas.search_papers('PromptIR', mode='lexical', doc_id=kept)
+    assert clean['results'] and not clean['stale_documents'] and not clean['warnings']
+
+
+def test_prune_removes_only_unavailable_sources_and_remove_cascades(atlas, bundle):
+    kept = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    deleted_root = copy_bundle(bundle, 'deleted', b'%PDF-deleted')
+    changed_root = copy_bundle(bundle, 'changed', b'%PDF-changed')
+    deleted = atlas.index(deleted_root, 'lexical')['results'][0]['doc_id']
+    changed = atlas.index(changed_root, 'lexical')['results'][0]['doc_id']
+    shutil.rmtree(deleted_root)
+    (changed_root / 'report.json').write_text(json.dumps(dict(status='needs_review')), 'utf-8')
+    preview = atlas.prune(dry_run=True)
+    assert [c['doc_id'] for c in preview['candidates']] == [deleted]
+    assert atlas.list_papers()['total'] == 3
+    assert [r['doc_id'] for r in atlas.prune()['removed']] == [deleted]
+    assert atlas.prune() == dict(dry_run=False, removed=[])
+    assert [d['doc_id'] for d in atlas.search_papers('PromptIR', mode='lexical')['stale_documents']] == [changed]
+    with pytest.raises(AtlasError, match='不存在'):
+        atlas.remove([kept, 'sha256:unknown'])
+    assert atlas.list_papers()['total'] == 2
+    assert atlas.remove([changed])['removed'][0]['doc_id'] == changed
+    conn = atlas.db.conn
+    assert [r[0] for r in conn.execute('SELECT doc_id FROM documents')] == [kept]
+    assert conn.execute('SELECT COUNT(*) FROM pages WHERE doc_id!=?', (kept,)).fetchone()[0] == 0
+    assert conn.execute('SELECT COUNT(*) FROM chunks WHERE doc_id!=?', (kept,)).fetchone()[0] == 0
+    assert (conn.execute('SELECT COUNT(*) FROM chunks_fts').fetchone()[0]
+            == conn.execute('SELECT COUNT(*) FROM chunks').fetchone()[0])
+    # Removing from the index never touches source files.
+    assert (changed_root / 'source.pdf').is_file()
+
+
+def test_cli_remove_and_prune(atlas, bundle, capsys):
+    from paperatlas.cli import main
+    doc = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    data = str(atlas.db.directory)
+    assert main(['--data-dir', data, 'prune', '--dry-run']) == 0
+    assert json.loads(capsys.readouterr().out) == dict(dry_run=True, candidates=[])
+    assert main(['--data-dir', data, 'remove', 'sha256:unknown']) == 2
+    assert main(['--data-dir', data, 'remove', doc]) == 0
+    assert json.loads(capsys.readouterr().out)['removed'][0]['doc_id'] == doc
+    assert atlas.list_papers()['total'] == 0
+
+
+def test_long_query_is_fit_to_semantic_model_while_lexical_uses_all_terms(atlas, bundle, fake_embedder):
+    atlas._embedder = fake_embedder
+    atlas.index(bundle)
+    short = atlas.search_papers('PromptIR degradation')
+    assert short['results'] and not short['warnings']
+    query = '图像退化恢复' * 200 + ' PromptIR'
+    assert fake_embedder.tokenizer.encode('query: ' + query)[512:]
+    response = atlas.search_papers(query)
+    assert response['results'] and any('512 tokens' in w for w in response['warnings'])
+    model_input = fake_embedder.model.inputs[-1]
+    assert model_input.startswith('query: 图像退化恢复') and len(fake_embedder.tokenizer.encode(model_input)) <= 512
+    # The term beyond the model window still reaches the keyword channel.
+    assert any('PromptIR' in r['excerpt'] for r in atlas.search_papers(query, mode='lexical')['results'])
+    assert atlas.search_papers(query, mode='semantic')['warnings']

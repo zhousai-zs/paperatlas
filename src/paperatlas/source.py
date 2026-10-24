@@ -11,6 +11,7 @@ from .errors import AtlasError
 MARKER = re.compile(r'<!--\s*source_page:\s*(\d+)\s*-->')
 INPUTS = ('document.json', 'document.md', 'report.json', 'evidence.json',
           'manifest.json', 'integrity.json', 'review/revisions.json', 'original-document.md')
+REQUIRED = ('document.json', 'document.md', 'report.json', 'source.pdf')
 
 
 def digest(path):

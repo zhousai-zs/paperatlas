@@ -1,10 +1,13 @@
 import hashlib
 import json
+import re
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from paperatlas.core import Atlas
+from paperatlas.embedding import Embedder
 
 
 def pytest_configure(config):
@@ -38,3 +41,31 @@ def atlas(tmp_path):
     instance = Atlas(tmp_path / 'data', create=True)
     yield instance
     instance.close()
+
+
+class FakeTokenizer:
+    """Offline stand-in with the HuggingFace call shape used by Chunker and fit_query."""
+
+    def __call__(self, text, add_special_tokens=True, return_offsets_mapping=False, verbose=True):
+        offsets = [(m.start(), m.end()) for m in re.finditer(r'[一-鿿]|\w+|[^\w\s]', text)]
+        return dict(input_ids=[0] * len(offsets), offset_mapping=offsets)
+
+    def encode(self, text):
+        return [0] * (len(self(text)['offset_mapping']) + 2)
+
+
+class FakeModel:
+    def __init__(self):
+        self.inputs = []
+
+    def encode(self, inputs, **_):
+        self.inputs.extend(inputs)
+        vectors = np.array([[len(t) % 7 + 1, 1, 0, 0] for t in inputs], dtype='float32')
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+
+
+@pytest.fixture
+def fake_embedder():
+    embedder = Embedder.__new__(Embedder)
+    embedder.tokenizer, embedder.model, embedder.key = FakeTokenizer(), FakeModel(), 'fake@test'
+    return embedder

@@ -2,9 +2,9 @@
 import re
 from html import unescape
 from markdown_it import MarkdownIt
-from .references import bibliography_entry
+from .references import bibliography_entry, reference_heading
 
-VERSION = 'page-block-v6'
+VERSION = 'page-block-v7'
 TARGET_TOKENS = 350
 PARSER = MarkdownIt('commonmark', {'html': True}).enable('table')
 
@@ -36,11 +36,13 @@ class Chunker:
             starts.append(starts[-1] + len(line))
         tokens = PARSER.parse(text)
         spans = []
+        after_reference = False
         for token in tokens:
             if token.level == 0 and token.map and token.type not in {'inline', 'heading_close'}:
                 begin, end = (starts[i] for i in token.map)
                 if token.type == 'heading_open':
                     section = plain(text[begin:end].lstrip('#').strip())
+                    after_reference = False
                     continue  # The heading accompanies body chunks as context, never as empty evidence.
                 fragment = text[begin:end].strip()
                 if (re.fullmatch(r'\[原页\s*\d+\]\([^)]*\)', fragment)
@@ -49,9 +51,14 @@ class Chunker:
                     continue
                 # Block-level bibliography detection survives intervening figure headings
                 # and references continuing on later pages. Raw pages remain available.
-                if (any(begin < b and end > a for a, b in reference_ranges)
-                        or bibliography_entry(plain(fragment))):
+                # The heuristic fallback applies only in a bibliography context (its heading,
+                # or right after aligned entries), so numbered body lists citing venues survive.
+                structured = any(begin < b and end > a for a, b in reference_ranges)
+                if structured or ((reference_heading(section) or after_reference)
+                                  and bibliography_entry(plain(fragment))):
+                    after_reference = True
                     continue
+                after_reference = False
                 spans.append((begin, end, section, token.type))
         # Math delimiters may span blank paragraphs. Coalesce all overlapping math regions.
         math_spans = [(m.start(), m.end()) for m in re.finditer(r'\$\$.*?\$\$', text, re.S)]

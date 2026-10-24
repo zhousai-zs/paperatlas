@@ -35,8 +35,20 @@ def reference_ranges(text, blocks):
     return sorted(set(ranges))
 
 
+REFERENCE_HEADING = re.compile(r'^(?:(?:\d+|[IVX]+)[.)]?\s*)?(?:references?|bibliography|参考文献|literature cited)\b',
+                               re.I)
+
+
+def reference_heading(section):
+    return bool(REFERENCE_HEADING.match(section.strip()))
+
+
 def bibliography_entry(text):
-    """Conservative fallback for numbered entries missing structured alignment."""
+    """Conservative fallback for numbered entries missing structured alignment.
+
+    Only meaningful inside a bibliography context: numbered body lists can cite
+    venues and years too. Callers decide the context.
+    """
     return bool(re.match(r'^\s*(?:\[\d+\]|\d+\.)\s+', text)
                 and re.search(r'\b(?:19|20)\d{2}\b', text)
                 and re.search(r'\b(?:arxiv|proceedings|ieee|cvpr|iccv|eccv|neurips|'

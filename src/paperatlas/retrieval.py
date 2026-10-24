@@ -5,6 +5,7 @@ import re
 import jieba
 import numpy as np
 
+from .embedding import MAX_TOKENS, fit_query
 from .errors import AtlasError
 
 jieba.setLogLevel(logging.WARNING)
@@ -38,10 +39,10 @@ def fuse_pages(rankings, pages):
     return output
 
 
-def ranks(database, query, mode, embedder=None, doc_id=None):
+def ranks(database, query, mode, embedder=None, doc_id=None, warnings=None):
     connection = database.conn
     from .query import expand
-    query = expand(query)
+    original, query = query, expand(query)
     body_filter = "lower(trim(c.section)) NOT IN ('references','bibliography','参考文献')"
     filters = ' AND ' + body_filter + (' AND c.doc_id=?' if doc_id else '')
     extra = [doc_id] if doc_id else []
@@ -66,8 +67,14 @@ def ranks(database, query, mode, embedder=None, doc_id=None):
             raise AtlasError('索引缺少当前模型向量；先运行 index 更新相关论文，或显式使用关键词模式。')
         rows = connection.execute('SELECT id,vector FROM chunks' + selected + ' ORDER BY id', params).fetchall()
         if rows:
+            # Lexical search keeps the whole query; only the model input is bounded.
+            semantic_query = fit_query(embedder.tokenizer, query)
+            if semantic_query != query and warnings is not None:
+                used = (f'仅使用查询前 {len(semantic_query)} 字符，未含附加术语别名'
+                        if len(semantic_query) <= len(original) else '使用完整查询，附加术语别名被截断')
+                warnings.append(f'查询超过语义模型 {MAX_TOKENS} tokens 输入上限；语义检索{used}；关键词检索使用完整查询。')
             vectors = np.stack([np.frombuffer(row['vector'], dtype='float32') for row in rows])
-            scores = vectors @ embedder.encode([query], query=True)[0]
+            scores = vectors @ embedder.encode([semantic_query], query=True)[0]
             order = np.argsort(-scores, kind='stable')[:50]
             semantic = [rows[int(i)]['id'] for i in order]
     if mode == 'hybrid':
