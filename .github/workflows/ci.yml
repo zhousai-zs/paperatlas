@@ -37,11 +37,11 @@ jobs:
       - name: Build wheel and source distribution
         run: uv build
       - name: Install the built wheel
-        run: uv pip install --reinstall --no-deps --no-index --find-links dist paperatlas==0.2.0
+        run: uv pip install --reinstall --no-deps --no-index --find-links dist paperatlas==0.3.0
       - name: Verify installed command and version
         run: |
           uv run --no-sync paperatlas --help
-          uv run --no-sync python -c "import importlib.metadata, paperatlas; assert paperatlas.__version__ == '0.2.0'; assert importlib.metadata.version('paperatlas') == '0.2.0'"
+          uv run --no-sync python -c "import importlib.metadata, paperatlas; assert paperatlas.__version__ == '0.3.0'; assert importlib.metadata.version('paperatlas') == '0.3.0'"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
