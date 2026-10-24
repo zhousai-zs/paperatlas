@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paperatlas"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Local, traceable retrieval over PaperBridge V1 bundles"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -19,6 +19,9 @@ paperatlas = "paperatlas.cli:main"
 [project.urls]
 Repository = "https://github.com/zhousai-zs/paperatlas"
 Issues = "https://github.com/zhousai-zs/paperatlas/issues"
+
+[tool.hatch.version]
+path = "src/paperatlas/__init__.py"
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/paperatlas/static/index.html" = "paperatlas/static/index.html"

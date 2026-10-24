@@ -275,3 +275,13 @@ def test_long_query_is_fit_to_semantic_model_while_lexical_uses_all_terms(atlas,
     # The term beyond the model window still reaches the keyword channel.
     assert any('PromptIR' in r['excerpt'] for r in atlas.search_papers(query, mode='lexical')['results'])
     assert atlas.search_papers(query, mode='semantic')['warnings']
+
+
+def test_atlas_context_manager(tmp_path):
+    from paperatlas.core import Atlas
+    data_dir = tmp_path / 'ctx_data'
+    with Atlas(data_dir, create=True) as instance:
+        assert instance.list_papers()['total'] == 0
+        conn = instance.db.conn
+    with pytest.raises(sqlite3.ProgrammingError, match='Cannot operate on a closed database'):
+        conn.execute('SELECT 1')

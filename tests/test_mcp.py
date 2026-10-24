@@ -1,10 +1,48 @@
+import asyncio
+from collections import Counter
 import json
 import os
 import sys
+import threading
 
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+
+@pytest.mark.asyncio
+async def test_cached_connections_are_thread_local_and_see_index_updates(atlas, bundle, monkeypatch):
+    from paperatlas import mcp_server
+    from paperatlas.core import Atlas
+
+    doc = atlas.index(bundle, 'lexical')['results'][0]['doc_id']
+    opened_threads = []
+
+    class TrackedAtlas(Atlas):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            assert kwargs['read_only'] is True
+            opened_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(mcp_server, 'Atlas', TrackedAtlas)
+    server = mcp_server.create_server(atlas.db.directory)
+
+    async def call(name, arguments):
+        result = await server.call_tool(name, arguments)
+        assert not result.is_error
+        return result.structured_content or json.loads(result.content[0].text)
+
+    for _ in range(2):
+        results = await asyncio.gather(*[
+            call('list_papers', {}) for _ in range(8)
+        ])
+        assert all(r['total'] == 1 for r in results)
+    assert opened_threads and max(Counter(opened_threads).values()) == 1
+    page = await call('read_page', {'doc_id': doc, 'page': 2})
+    assert '31.2' in page['markdown']
+    atlas.remove([doc])
+    listing = await call('list_papers', {})
+    assert listing['total'] == 0
 
 
 @pytest.mark.asyncio

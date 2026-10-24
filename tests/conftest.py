@@ -47,11 +47,18 @@ class FakeTokenizer:
     """Offline stand-in with the HuggingFace call shape used by Chunker and fit_query."""
 
     def __call__(self, text, add_special_tokens=True, return_offsets_mapping=False, verbose=True):
+        if isinstance(text, (list, tuple)):
+            tokenized = [self(t, add_special_tokens=add_special_tokens,
+                              return_offsets_mapping=return_offsets_mapping,
+                              verbose=verbose) for t in text]
+            return dict(input_ids=[item['input_ids'] for item in tokenized],
+                        offset_mapping=[item['offset_mapping'] for item in tokenized])
         offsets = [(m.start(), m.end()) for m in re.finditer(r'[一-鿿]|\w+|[^\w\s]', text)]
-        return dict(input_ids=[0] * len(offsets), offset_mapping=offsets)
+        extra = 2 if add_special_tokens else 0
+        return dict(input_ids=[0] * (len(offsets) + extra), offset_mapping=offsets)
 
     def encode(self, text):
-        return [0] * (len(self(text)['offset_mapping']) + 2)
+        return [0] * (len(self(text, add_special_tokens=False)['offset_mapping']) + 2)
 
 
 class FakeModel:

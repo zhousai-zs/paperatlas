@@ -1,8 +1,8 @@
+import threading
 from pathlib import Path
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
-from threading import Lock
 
 from .core import Atlas
 
@@ -10,7 +10,19 @@ from .core import Atlas
 def create_server(data_dir):
     directory = str(Path(data_dir).resolve())
     cached_embedder = None
-    search_lock = Lock()
+    search_lock = threading.Lock()
+    local = threading.local()
+
+    def get_atlas():
+        nonlocal cached_embedder
+        atlas = getattr(local, 'atlas', None)
+        if atlas is None:
+            atlas = Atlas(directory, read_only=True)
+            local.atlas = atlas
+        if cached_embedder is not None and atlas._embedder is None:
+            atlas._embedder = cached_embedder
+        return atlas
+
     annotations = ToolAnnotations(read_only_hint=True, destructive_hint=False,
                                   idempotent_hint=True, open_world_hint=False)
     server = MCPServer('PaperAtlas', instructions=(
@@ -25,35 +37,22 @@ def create_server(data_dir):
     @server.tool(annotations=annotations)
     def list_papers(limit: int = 50, offset: int = 0) -> dict:
         """列出已入库论文、完整 doc_id、页数及待复核状态。"""
-        atlas = Atlas(directory, read_only=True)
-        try:
-            return atlas.list_papers(limit, offset)
-        finally:
-            atlas.close()
+        return get_atlas().list_papers(limit, offset)
 
     @server.tool(annotations=annotations)
     def search_papers(query: str, limit: int = 5, doc_id: str | None = None, diverse: bool = False) -> dict:
         """中英文混合检索，返回命中附近至多约6000字符连续正文。主题综述/比较用 diverse=true，每篇最多两页；具体论文问题用 doc_id 深入搜索。"""
         nonlocal cached_embedder
         with search_lock:
-            atlas = Atlas(directory, read_only=True)
-            try:
-                # Share only the CPU model; SQLite connections stay local to the calling thread.
-                atlas._embedder = cached_embedder
-                output = atlas.search_papers(query, limit, doc_id, diverse=diverse)
-                cached_embedder = atlas._embedder
-                return output
-            finally:
-                atlas.close()
+            atlas = get_atlas()
+            output = atlas.search_papers(query, limit, doc_id, diverse=diverse)
+            cached_embedder = atlas._embedder
+            return output
 
     @server.tool(annotations=annotations)
     def read_page(doc_id: str, page: int, before: int = 0, after: int = 0) -> dict:
         """读取一基 PDF 页完整原文与证据路径。before/after=0–2 可附带相邻页，跨页方法/表格请使用；超预算的邻页列入 omitted_pages。"""
-        atlas = Atlas(directory, read_only=True)
-        try:
-            return atlas.read_page(doc_id, page, before, after)
-        finally:
-            atlas.close()
+        return get_atlas().read_page(doc_id, page, before, after)
 
     return server
 

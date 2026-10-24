@@ -57,7 +57,8 @@ class Embedder:
     def encode(self, texts, query=False):
         prefix = 'query: ' if query else 'passage: '
         inputs = [prefix + t for t in texts]
-        if any(len(self.tokenizer.encode(t)) > MAX_TOKENS for t in inputs):
+        tokenized = self.tokenizer(inputs, add_special_tokens=True, verbose=False)
+        if any(len(ids) > MAX_TOKENS for ids in tokenized['input_ids']):
             raise AtlasError('模型输入超过 512 tokens；请缩短查询或重新切块。')
         return self.model.encode(inputs, normalize_embeddings=True, batch_size=16,
                                  show_progress_bar=False, convert_to_numpy=True).astype('float32')

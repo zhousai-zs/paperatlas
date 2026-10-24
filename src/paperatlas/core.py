@@ -18,6 +18,12 @@ class Atlas:
     def close(self):
         self.db.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     @property
     def embedder(self):
         if self._embedder is None:
